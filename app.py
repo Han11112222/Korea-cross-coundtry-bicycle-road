@@ -15,7 +15,7 @@ from streamlit_folium import st_folium
 
 BASE = Path(__file__).parent
 DONE_COLOR = "#dc2626"   # 완주/완료: 붉은색
-TODO_COLOR = "#6b7280"   # 남은 구간: 회색
+TODO_COLOR = "#2563eb"   # 전체(남은) 구간: 푸른색 점선
 
 GROUP_ORDER = ["국토종주", "4대강", "북한강", "섬진강", "동해안", "제주환상", "오천"]
 GROUP_LABEL = {
@@ -83,19 +83,33 @@ def build_map(df: pd.DataFrame, view: pd.DataFrame, show_lines: bool = True) -> 
     shown = set(view["name"])
 
     if show_lines:
+        segments = []
         for label, sub in build_paths(df):
             rows = sub.to_dict("records")
             for p, q in zip(rows, rows[1:]):
-                if p["name"] not in shown or q["name"] not in shown:
-                    continue
-                done = bool(p["done"] and q["done"])
+                if p["name"] in shown and q["name"] in shown:
+                    segments.append((label, p, q, bool(p["done"] and q["done"])))
+
+        # 1) 전체 구간: 푸른색 점선
+        for label, p, q, done in segments:
+            folium.PolyLine(
+                [[p["lat"], p["lon"]], [q["lat"], q["lon"]]],
+                color=TODO_COLOR,
+                weight=3,
+                opacity=0.8,
+                dash_array="2 8",
+                line_cap="round",
+                tooltip=f"{label}: {p['name']} → {q['name']}",
+            ).add_to(m)
+        # 2) 완료 구간: 붉은색 실선을 위에 덧그림
+        for label, p, q, done in segments:
+            if done:
                 folium.PolyLine(
                     [[p["lat"], p["lon"]], [q["lat"], q["lon"]]],
-                    color=DONE_COLOR if done else TODO_COLOR,
-                    weight=5 if done else 3,
-                    opacity=0.9 if done else 0.6,
-                    dash_array=None if done else "6",
-                    tooltip=f"{label}: {p['name']} → {q['name']}",
+                    color=DONE_COLOR,
+                    weight=5,
+                    opacity=0.9,
+                    tooltip=f"{label}: {p['name']} → {q['name']} (완료)",
                 ).add_to(m)
 
     cluster = MarkerCluster(disableClusteringAtZoom=10).add_to(m)
@@ -110,7 +124,7 @@ def build_map(df: pd.DataFrame, view: pd.DataFrame, show_lines: bool = True) -> 
             [r.lat, r.lon],
             tooltip=f"{r.name} ({status})",
             popup=folium.Popup(popup, max_width=260),
-            icon=folium.Icon(color="red" if r.done else "gray", icon="check" if r.done else "flag", prefix="fa"),
+            icon=folium.Icon(color="red" if r.done else "blue", icon="check" if r.done else "flag", prefix="fa"),
         ).add_to(cluster)
 
     legend = f"""
@@ -118,8 +132,8 @@ def build_map(df: pd.DataFrame, view: pd.DataFrame, show_lines: bool = True) -> 
                 background: white; padding: 10px 14px; border-radius: 8px;
                 box-shadow: 0 1px 6px rgba(0,0,0,.3); font-size: 13px;">
       <b>범례</b><br>
-      <span style="color:{DONE_COLOR}; font-weight:bold">━</span> 완주한 구간 / 인증센터<br>
-      <span style="color:{TODO_COLOR}">┅</span> 남은 구간 / 인증센터
+      <span style="color:{DONE_COLOR}; font-weight:bold">━━</span> 완료한 구간 / 인증센터<br>
+      <span style="color:{TODO_COLOR}; font-weight:bold">· · ·</span> 전체 구간(점선) / 남은 인증센터
     </div>"""
     m.get_root().html.add_child(folium.Element(legend))
     return m
