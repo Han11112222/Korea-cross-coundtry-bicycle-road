@@ -204,18 +204,31 @@ def add_rider(m: folium.Map, df: pd.DataFrame, shown: set):
     m.get_root().script.add_child(folium.Element(js))
 
 
-def stat_cards(total: int, done: int) -> str:
+def km_totals(df: pd.DataFrame):
+    """(전체 km, 완료 누적 km). 국토종주는 공식 총거리(633km) 기준으로 맞춘다."""
+    total_km = done_km = 0.0
+    for group, g in df.groupby("group"):
+        r = g.groupby("route", sort=False).agg(km=("km", "first"), n=("name", "count"), d=("done", "sum"))
+        base = r["km"].sum()
+        factor = GROUP_KM[group] / base if group in GROUP_KM and base else 1.0
+        total_km += base * factor
+        done_km += (r["km"] * r["d"] / r["n"]).sum() * factor
+    return total_km, done_km
+
+
+def stat_cards(total: int, done: int, total_km: float, done_km: float) -> str:
     items = [
-        ("전체 인증센터", f"{total}", "#2563eb", "37,99,235"),
-        ("완료", f"{done}", "#dc2626", "220,38,38"),
-        ("진행률", f"{done / total:.0%}", "#16a34a", "22,163,74"),
+        ("전체 인증센터", f"{total}", f"전체 {total_km:,.0f}km", "#2563eb", "37,99,235"),
+        ("완료", f"{done}", f"누적 {done_km:,.0f}km", "#dc2626", "220,38,38"),
+        ("진행률", f"{done / total:.0%}", "", "#16a34a", "22,163,74"),
     ]
     cards = "".join(
         f'<div style="flex:1; min-width:150px; border-left:6px solid {c}; background:rgba({rgb},.12);'
         f' border-radius:10px; padding:10px 18px;">'
         f'<div style="font-size:14px; opacity:.85;">{label}</div>'
-        f'<div style="font-size:34px; font-weight:800; color:{c}; line-height:1.2;">{value}</div></div>'
-        for label, value, c, rgb in items
+        f'<div style="font-size:34px; font-weight:800; color:{c}; line-height:1.2;">{value}'
+        f'<span style="font-size:16px; font-weight:700; margin-left:10px;">{sub}</span></div></div>'
+        for label, value, sub, c, rgb in items
     )
     return f'<div style="display:flex; gap:14px; flex-wrap:wrap; margin:6px 0 18px;">{cards}</div>'
 
@@ -375,7 +388,8 @@ def main():
         view = view[~view["done"]]
 
     total, done = len(df), int(df["done"].sum())
-    st.markdown(stat_cards(total, done), unsafe_allow_html=True)
+    total_km, done_km = km_totals(df)
+    st.markdown(stat_cards(total, done, total_km, done_km), unsafe_allow_html=True)
 
     st.markdown("#### 🗺️ 국토종주 지도")
     if view.empty:
@@ -386,7 +400,12 @@ def main():
 
     # ---- 구간별 현황 표 (왼쪽) + 상세루트 (오른쪽) : 한 화면에 보이도록 촘촘하게 ----
     st.markdown(COMPACT_CSS, unsafe_allow_html=True)
-    st.markdown("#### 그랜드슬램 구간별 현황")
+    st.markdown(
+        '#### 그랜드슬램 구간별 현황 '
+        f'<span style="font-size:1rem; font-weight:700; color:{DONE_COLOR}; margin-left:12px;">완료 누적 {done_km:,.0f}km</span>'
+        f'<span style="font-size:1rem; font-weight:600; color:{TODO_COLOR}; margin-left:8px;">/ 전체 {total_km:,.0f}km</span>',
+        unsafe_allow_html=True,
+    )
     left, right = st.columns([3.3, 2], gap="medium")
 
     with left:
@@ -444,6 +463,7 @@ def main():
 
     st.caption(
         "인증센터 이름·길이는 자전거 행복나눔(https://www.bike.go.kr) 안내를 따랐고, "
+        "누적·전체 km는 국토종주 공식 633km와 각 자전거길 길이 합계 기준입니다. "
         "좌표는 근사치(coord_status=approx)입니다. 정확한 위치는 centers.csv에서 수정하세요."
     )
 
