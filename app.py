@@ -11,7 +11,9 @@ from pathlib import Path
 import folium
 import pandas as pd
 import streamlit as st
+from branca.element import MacroElement
 from folium.plugins import Fullscreen, MarkerCluster
+from jinja2 import Template
 from streamlit_folium import st_folium
 
 BASE = Path(__file__).parent
@@ -204,17 +206,30 @@ RIDER_JS = """
 """
 
 
+class Rider(MacroElement):
+    """아빠와 아들 자전거 애니메이션. 지도의 자식 요소(MacroElement)여야 st_folium이 스크립트를 실행한다."""
+
+    _template = Template(
+        "{% macro script(this, kwargs) %}"
+        + RIDER_JS.replace("__MAP__", "{{ this._parent.get_name() }}")
+        .replace("__PTS__", "{{ this.pts }}")
+        .replace("__NAMES__", "{{ this.names }}")
+        + "{% endmacro %}"
+    )
+
+    def __init__(self, pts, names):
+        super().__init__()
+        self._name = "Rider"
+        self.pts = json.dumps(pts)
+        self.names = json.dumps(names, ensure_ascii=False)
+
+
 def add_rider(m: folium.Map, df: pd.DataFrame, shown: set):
     """인천 아라서해갑문 → 부산 낙동강하굿둑까지 아빠와 아들이 자전거로 달리는 애니메이션(Start 버튼)."""
     main = next((sub for label, sub in build_paths(df) if label == MAIN_LABEL), None)
     if main is None or not set(main["name"]) <= shown:
         return
-    js = (
-        RIDER_JS.replace("__MAP__", m.get_name())
-        .replace("__PTS__", json.dumps(main[["lat", "lon"]].values.tolist()))
-        .replace("__NAMES__", json.dumps(main["name"].tolist(), ensure_ascii=False))
-    )
-    m.get_root().script.add_child(folium.Element(js))
+    m.add_child(Rider(main[["lat", "lon"]].values.tolist(), main["name"].tolist()))
 
 
 def km_totals(df: pd.DataFrame):
