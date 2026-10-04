@@ -11,6 +11,7 @@ from pathlib import Path
 import folium
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from branca.element import MacroElement
 from folium.plugins import Fullscreen, MarkerCluster
 from jinja2 import Template
@@ -116,6 +117,26 @@ def build_paths(df: pd.DataFrame):
     return paths
 
 
+START_BUTTON_HTML = """
+<style>
+html, body { margin: 0; background: transparent; font-family: sans-serif; }
+button { background: #16a34a; color: #fff; border: none; border-radius: 10px; padding: 9px 22px;
+         font-size: 16px; font-weight: 800; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+button:hover { background: #15803d; }
+</style>
+<button id="b">▶ Start</button>
+<script>
+document.getElementById("b").onclick = function () {
+  var f = window.parent.frames;
+  for (var i = 0; i < f.length; i++) {
+    try { f[i].postMessage({type: "dadson-start"}, "*"); } catch (e) {}
+  }
+  this.textContent = "↻ 다시 Start";
+};
+</script>
+"""
+
+
 RIDER_JS = """
 (function () {
   var tries = 0;
@@ -131,14 +152,19 @@ RIDER_JS = """
     var style = document.createElement("style");
     style.textContent =
       ".dadson{background:none;border:none;}" +
-      ".dadson-inner{font-size:30px;white-space:nowrap;line-height:1;" +
-      "animation:dadson-bob .45s ease-in-out infinite alternate;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35));}" +
-      ".dadson-inner .son{font-size:22px;margin-left:-4px;}" +
-      "@keyframes dadson-bob{from{transform:translateY(0);}to{transform:translateY(-4px);}}" +
-      ".dadson-tip{font-weight:700;font-size:12px;border-radius:10px;}" +
-      ".dadson-btn{background:#16a34a;color:#fff;padding:8px 16px;border-radius:10px;" +
-      "box-shadow:0 1px 6px rgba(0,0,0,.35);cursor:pointer;font-size:15px;font-weight:800;user-select:none;}" +
-      ".dadson-btn:hover{background:#15803d;}";
+      ".dadson-inner{display:flex;align-items:flex-end;gap:6px;white-space:nowrap;line-height:1;" +
+      "filter:drop-shadow(0 3px 3px rgba(0,0,0,.35));cursor:pointer;}" +
+      ".dadson-rider{display:flex;flex-direction:column;align-items:center;" +
+      "animation:dadson-bob .45s ease-in-out infinite alternate;}" +
+      ".dadson-rider.son{animation-delay:.2s;}" +
+      ".dadson-bubble{position:relative;background:#fffbea;color:#111;border:2px solid #f59e0b;" +
+      "border-radius:14px;padding:2px 10px;font:800 14px/1.3 sans-serif;margin-bottom:8px;}" +
+      ".dadson-bubble:after{content:'';position:absolute;left:50%;bottom:-9px;margin-left:-6px;" +
+      "border:6px solid transparent;border-top-color:#f59e0b;border-bottom:0;}" +
+      ".dadson-emoji{font-size:60px;}" +
+      ".dadson-rider.son .dadson-emoji{font-size:44px;}" +
+      "@keyframes dadson-bob{from{transform:translateY(0);}to{transform:translateY(-6px);}}" +
+      ".dadson-tip{font-weight:700;font-size:12px;border-radius:10px;}";
     document.head.appendChild(style);
 
     var cum = [0];
@@ -149,12 +175,15 @@ RIDER_JS = """
 
     var icon = L.divIcon({
       className: "dadson",
-      html: '<div class="dadson-inner"><span class="dad">🚴‍♂️</span><span class="son">🚴</span></div>',
-      iconSize: [72, 40], iconAnchor: [36, 34]
+      html: '<div class="dadson-inner">' +
+            '<div class="dadson-rider dad"><div class="dadson-bubble">Han</div><span class="dadson-emoji">🚴‍♂️</span></div>' +
+            '<div class="dadson-rider son"><div class="dadson-bubble">Cool Choi</div><span class="dadson-emoji">🚴</span></div>' +
+            '</div>',
+      iconSize: [190, 130], iconAnchor: [95, 124]
     });
-    var marker = L.marker(pts[0], {icon: icon, zIndexOffset: 1000, interactive: false}).addTo(map);
-    var READY = "🚴 " + names[0] + " 출발 준비! Start를 눌러요";
-    marker.bindTooltip(READY, {permanent: true, direction: "top", offset: [0, -30], className: "dadson-tip"});
+    var marker = L.marker(pts[0], {icon: icon, zIndexOffset: 1000}).addTo(map);
+    var READY = "인천 " + names[0] + " 출발 준비! ▶ Start를 눌러요";
+    marker.bindTooltip(READY, {permanent: true, direction: "bottom", offset: [0, 4], className: "dadson-tip"});
 
     var duration = 45000, startTs = null, req = null, lastText = "";
     function position(d) {
@@ -181,25 +210,18 @@ RIDER_JS = """
       else text = "📍 " + names[k] + " 통과";
       if (text !== lastText) { marker.setTooltipContent(text); lastText = text; }
       if (p < 1) req = requestAnimationFrame(step);
-      else btn.innerHTML = "↻ 다시 Start";
     }
     function start() {
       if (req) cancelAnimationFrame(req);
       startTs = null;
-      btn.innerHTML = "↻ 다시 Start";
       req = requestAnimationFrame(step);
     }
 
-    var btn;
-    var ctl = L.control({position: "topright"});
-    ctl.onAdd = function () {
-      btn = L.DomUtil.create("div", "dadson-btn");
-      btn.innerHTML = "▶ Start";
-      L.DomEvent.disableClickPropagation(btn);
-      btn.onclick = start;
-      return btn;
-    };
-    ctl.addTo(map);
+    // 지도 제목 옆의 Start 버튼이 보내는 신호를 받는다 (자전거를 직접 눌러도 출발)
+    window.addEventListener("message", function (ev) {
+      if (ev.data && ev.data.type === "dadson-start") start();
+    });
+    marker.on("click", start);
   }
   boot();
 })();
@@ -419,7 +441,14 @@ def main():
     total_km, done_km = km_totals(df)
     st.markdown(stat_cards(total, done, total_km, done_km), unsafe_allow_html=True)
 
-    st.markdown("#### 🗺️ 국토종주 지도")
+    title_col, start_col = st.columns([1.8, 8.2], vertical_alignment="center")
+    title_col.markdown("#### 🗺️ 국토종주 지도")
+    with start_col:
+        if animate:
+            if hasattr(st, "iframe"):  # 최신 Streamlit
+                st.iframe(START_BUTTON_HTML.strip(), height=48)
+            else:  # 이전 버전 호환
+                components.html(START_BUTTON_HTML, height=48)
     if view.empty:
         st.info("조건에 맞는 인증센터가 없습니다.")
     else:
