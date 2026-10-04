@@ -114,84 +114,98 @@ def build_paths(df: pd.DataFrame):
     return paths
 
 
-RIDER_CSS = """
-<style>
-.dadson { background: none; border: none; }
-.dadson-inner { font-size: 28px; white-space: nowrap; line-height: 1;
-    animation: dadson-bob .45s ease-in-out infinite alternate;
-    filter: drop-shadow(0 2px 2px rgba(0,0,0,.35)); }
-.dadson-inner .son { font-size: 20px; margin-left: -4px; }
-@keyframes dadson-bob { from { transform: translateY(0); } to { transform: translateY(-4px); } }
-.dadson-tip { font-weight: 700; font-size: 12px; border-radius: 10px; }
-.dadson-btn { background: #fff; color: #111; padding: 6px 10px; border-radius: 8px;
-    box-shadow: 0 1px 6px rgba(0,0,0,.3); cursor: pointer; font-size: 13px; font-weight: 700; }
-</style>
-"""
-
 RIDER_JS = """
 (function () {
-  var map = __MAP__;
-  var pts = __PTS__;
-  var names = __NAMES__;
-  var cum = [0];
-  for (var i = 1; i < pts.length; i++) {
-    cum.push(cum[i - 1] + map.distance(pts[i - 1], pts[i]));
+  var tries = 0;
+  function boot() {
+    if (typeof __MAP__ === "undefined") {   // 지도가 만들어질 때까지 기다린다
+      if (tries++ < 400) setTimeout(boot, 50);
+      return;
+    }
+    var map = __MAP__;
+    var pts = __PTS__;
+    var names = __NAMES__;
+
+    var style = document.createElement("style");
+    style.textContent =
+      ".dadson{background:none;border:none;}" +
+      ".dadson-inner{font-size:30px;white-space:nowrap;line-height:1;" +
+      "animation:dadson-bob .45s ease-in-out infinite alternate;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35));}" +
+      ".dadson-inner .son{font-size:22px;margin-left:-4px;}" +
+      "@keyframes dadson-bob{from{transform:translateY(0);}to{transform:translateY(-4px);}}" +
+      ".dadson-tip{font-weight:700;font-size:12px;border-radius:10px;}" +
+      ".dadson-btn{background:#16a34a;color:#fff;padding:8px 16px;border-radius:10px;" +
+      "box-shadow:0 1px 6px rgba(0,0,0,.35);cursor:pointer;font-size:15px;font-weight:800;user-select:none;}" +
+      ".dadson-btn:hover{background:#15803d;}";
+    document.head.appendChild(style);
+
+    var cum = [0];
+    for (var i = 1; i < pts.length; i++) {
+      cum.push(cum[i - 1] + map.distance(pts[i - 1], pts[i]));
+    }
+    var total = cum[cum.length - 1];
+
+    var icon = L.divIcon({
+      className: "dadson",
+      html: '<div class="dadson-inner"><span class="dad">🚴‍♂️</span><span class="son">🚴</span></div>',
+      iconSize: [72, 40], iconAnchor: [36, 34]
+    });
+    var marker = L.marker(pts[0], {icon: icon, zIndexOffset: 1000, interactive: false}).addTo(map);
+    var READY = "🚴 " + names[0] + " 출발 준비! Start를 눌러요";
+    marker.bindTooltip(READY, {permanent: true, direction: "top", offset: [0, -30], className: "dadson-tip"});
+
+    var duration = 45000, startTs = null, req = null, lastText = "";
+    function position(d) {
+      var i = 1;
+      while (i < cum.length - 1 && cum[i] < d) i++;
+      var seg = cum[i] - cum[i - 1] || 1;
+      var t = Math.min(Math.max((d - cum[i - 1]) / seg, 0), 1);
+      return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t,
+              pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t];
+    }
+    function passed(d) {
+      var k = 0;
+      for (var i = 0; i < cum.length; i++) { if (cum[i] <= d + 1) k = i; }
+      return k;
+    }
+    function step(ts) {
+      if (startTs === null) startTs = ts;
+      var p = Math.min((ts - startTs) / duration, 1);
+      var d = p * total;
+      marker.setLatLng(position(d));
+      var k = passed(d), text;
+      if (p >= 1) text = "🎉 " + names[names.length - 1] + " 도착!";
+      else if (k === 0) text = "출발! " + names[0];
+      else text = "📍 " + names[k] + " 통과";
+      if (text !== lastText) { marker.setTooltipContent(text); lastText = text; }
+      if (p < 1) req = requestAnimationFrame(step);
+      else btn.innerHTML = "↻ 다시 Start";
+    }
+    function start() {
+      if (req) cancelAnimationFrame(req);
+      startTs = null;
+      btn.innerHTML = "↻ 다시 Start";
+      req = requestAnimationFrame(step);
+    }
+
+    var btn;
+    var ctl = L.control({position: "topright"});
+    ctl.onAdd = function () {
+      btn = L.DomUtil.create("div", "dadson-btn");
+      btn.innerHTML = "▶ Start";
+      L.DomEvent.disableClickPropagation(btn);
+      btn.onclick = start;
+      return btn;
+    };
+    ctl.addTo(map);
   }
-  var total = cum[cum.length - 1];
-  var icon = L.divIcon({
-    className: "dadson",
-    html: '<div class="dadson-inner"><span class="dad">🚴‍♂️</span><span class="son">🚴</span></div>',
-    iconSize: [70, 40], iconAnchor: [35, 34]
-  });
-  var marker = L.marker(pts[0], {icon: icon, zIndexOffset: 1000, interactive: false}).addTo(map);
-  marker.bindTooltip("출발! " + names[0], {permanent: true, direction: "top", offset: [0, -30], className: "dadson-tip"});
-  var duration = 45000, startTs = null, req = null, lastText = "";
-  function position(d) {
-    var i = 1;
-    while (i < cum.length - 1 && cum[i] < d) i++;
-    var seg = cum[i] - cum[i - 1] || 1;
-    var t = Math.min(Math.max((d - cum[i - 1]) / seg, 0), 1);
-    return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t,
-            pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t];
-  }
-  function passed(d) {
-    var k = 0;
-    for (var i = 0; i < cum.length; i++) { if (cum[i] <= d + 1) k = i; }
-    return k;
-  }
-  function step(ts) {
-    if (startTs === null) startTs = ts;
-    var p = Math.min((ts - startTs) / duration, 1);
-    var d = p * total;
-    marker.setLatLng(position(d));
-    var k = passed(d), text;
-    if (p >= 1) text = "🎉 " + names[names.length - 1] + " 도착!";
-    else if (k === 0) text = "출발! " + names[0];
-    else text = "📍 " + names[k] + " 통과";
-    if (text !== lastText) { marker.setTooltipContent(text); lastText = text; }
-    if (p < 1) req = requestAnimationFrame(step);
-  }
-  function start() {
-    if (req) cancelAnimationFrame(req);
-    startTs = null;
-    req = requestAnimationFrame(step);
-  }
-  var ctl = L.control({position: "topright"});
-  ctl.onAdd = function () {
-    var div = L.DomUtil.create("div", "dadson-btn");
-    div.innerHTML = "🚴 다시 출발";
-    L.DomEvent.disableClickPropagation(div);
-    div.onclick = start;
-    return div;
-  };
-  ctl.addTo(map);
-  start();
+  boot();
 })();
 """
 
 
 def add_rider(m: folium.Map, df: pd.DataFrame, shown: set):
-    """인천 아라서해갑문 → 부산 낙동강하굿둑까지 아빠와 아들이 자전거로 달리는 애니메이션."""
+    """인천 아라서해갑문 → 부산 낙동강하굿둑까지 아빠와 아들이 자전거로 달리는 애니메이션(Start 버튼)."""
     main = next((sub for label, sub in build_paths(df) if label == MAIN_LABEL), None)
     if main is None or not set(main["name"]) <= shown:
         return
@@ -200,7 +214,6 @@ def add_rider(m: folium.Map, df: pd.DataFrame, shown: set):
         .replace("__PTS__", json.dumps(main[["lat", "lon"]].values.tolist()))
         .replace("__NAMES__", json.dumps(main["name"].tolist(), ensure_ascii=False))
     )
-    m.get_root().header.add_child(folium.Element(RIDER_CSS))
     m.get_root().script.add_child(folium.Element(js))
 
 
