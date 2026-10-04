@@ -28,6 +28,25 @@ GROUP_LABEL = {
     "제주환상": "제주환상",
     "오천": "오천",
 }
+GROUP_SHORT = {
+    "국토종주": "국토종주",
+    "4대강": "4대강 추가구간",
+    "북한강": "북한강",
+    "섬진강": "섬진강",
+    "동해안": "동해안",
+    "제주환상": "제주환상",
+    "오천": "오천",
+}
+COMPACT_CSS = """
+<style>
+.st-key-route_table [data-testid="stVerticalBlock"] { gap: 0.15rem; }
+.st-key-route_table [data-testid="stHorizontalBlock"] { gap: 0.4rem; }
+.st-key-route_table p { margin: 0; font-size: 0.85rem; line-height: 1.25; }
+.st-key-route_table button { min-height: 1.6rem; padding: 0 0.5rem; }
+.st-key-route_table button p { font-size: 0.8rem; }
+.st-key-route_table .group-row { border-top: 1px solid rgba(128,128,128,.25); padding-top: 2px; }
+</style>
+"""
 GROUP_KM = {"국토종주": 633}  # 국토종주 전체 거리(km)
 
 # 인증 완료 박스: (제목, 필요한 그랜드슬램 구간, 설명)
@@ -243,54 +262,62 @@ def main():
     c2.metric("완료", done)
     c3.metric("진행률", f"{done / total:.0%}")
 
-    # ---- 구간별 현황 표 (상세루트 버튼을 누르면 해당 구간의 인증센터가 나옴) ----
+    # ---- 구간별 현황 표 (왼쪽) + 상세루트 (오른쪽) : 한 화면에 보이도록 촘촘하게 ----
+    st.markdown(COMPACT_CSS, unsafe_allow_html=True)
     st.markdown("#### 그랜드슬램 구간별 현황")
-    st.caption("'상세루트' 버튼을 누르면 해당 구간의 인증센터가 나오고, 다시 누르면 닫힙니다.")
-    widths = [2.6, 3.0, 0.9, 1.1, 1.2, 1.3]
-    for col, title in zip(st.columns(widths), ["그랜드슬램", "자전거길(구간)", "센터수", "길이", "상태", "상세"]):
-        col.markdown(f"**{title}**")
-    st.divider()
+    left, right = st.columns([3.3, 2], gap="medium")
 
-    for group in group_opts:
-        g = df[df["group"] == group]
-        first = True
-        for route, r in g.groupby("route", sort=False):
-            cols = st.columns(widths, vertical_alignment="center")
-            if first:
-                label = GROUP_LABEL.get(group, group)
-                if group in GROUP_KM:
-                    label += f" · 총 {GROUP_KM[group]}km"
-                cols[0].markdown(f"**{label}**")
-                first = False
-            cols[1].write(route)
-            cols[2].write(f"{len(r)}개")
-            cols[3].write(km_text(r["km"].iloc[0]))
-            cols[4].write(route_status(r))
-            is_open = st.session_state.get("detail") == route
-            cols[5].button(
-                "닫기" if is_open else "상세루트",
-                key=f"detail_{route}",
-                on_click=toggle_detail,
-                args=(route,),
+    with left:
+        widths = [1.7, 3.0, 0.8, 0.9, 1.1, 1.0]
+        with st.container(key="route_table"):
+            for col, title in zip(st.columns(widths), ["그랜드슬램", "자전거길(구간)", "센터", "길이", "상태", "상세"]):
+                col.markdown(f"**{title}**")
+            for group in group_opts:
+                g = df[df["group"] == group]
+                first = True
+                for route, r in g.groupby("route", sort=False):
+                    cols = st.columns(widths, vertical_alignment="center")
+                    if first:
+                        label = GROUP_SHORT.get(group, group)
+                        if group in GROUP_KM:
+                            label += f" {GROUP_KM[group]}km"
+                        cols[0].markdown(f"**{label}**")
+                        first = False
+                    cols[1].write(route)
+                    cols[2].write(f"{len(r)}개")
+                    cols[3].write(km_text(r["km"].iloc[0]))
+                    cols[4].write(route_status(r))
+                    is_open = st.session_state.get("detail") == route
+                    cols[5].button(
+                        "닫기" if is_open else "상세루트",
+                        key=f"detail_{route}",
+                        on_click=toggle_detail,
+                        args=(route,),
+                    )
+
+    with right:
+        detail = st.session_state.get("detail")
+        if detail and (df["route"] == detail).any():
+            r = df[df["route"] == detail].sort_values("seq")
+            seg = segment_km(r, detail)
+            st.markdown(f"**{detail}** · 센터 {len(r)}개 · {km_text(r['km'].iloc[0])}")
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "순서": r["seq"].values,
+                        "인증센터": r["name"].values,
+                        "유형": r["kind"].values,
+                        "이전 센터까지(약 km)": ["출발" if v is None else f"{v:.1f}" for v in seg],
+                        "상태": ["✅ 완료" if d else "⬜ 미완료" for d in r["done"]],
+                    }
+                ),
+                width="stretch",
+                hide_index=True,
+                height=min(38 + 35 * len(r), 470),
             )
-            if is_open:
-                r = r.sort_values("seq")
-                seg = segment_km(r, route)
-                st.dataframe(
-                    pd.DataFrame(
-                        {
-                            "순서": r["seq"].values,
-                            "인증센터": r["name"].values,
-                            "유형": r["kind"].values,
-                            "이전 센터까지(약 km)": ["출발" if v is None else f"{v:.1f}" for v in seg],
-                            "상태": ["✅ 완료" if d else "⬜ 미완료" for d in r["done"]],
-                        }
-                    ),
-                    width="stretch",
-                    hide_index=True,
-                )
-                st.caption(f"{route} · 센터 {len(r)}개 · 총 {km_text(r['km'].iloc[0])} (센터 간 거리는 직선거리 비율로 나눈 추정값)")
-        st.divider()
+            st.caption("센터 간 거리는 직선거리 비율로 나눈 추정값입니다.")
+        else:
+            st.info("왼쪽 표의 '상세루트' 버튼을 누르면 해당 구간의 인증센터가 여기에 나옵니다.")
 
     st.markdown("#### 지도")
     if view.empty:
