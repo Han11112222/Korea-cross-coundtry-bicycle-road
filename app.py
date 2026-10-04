@@ -188,6 +188,30 @@ def route_status(r: pd.DataFrame) -> str:
     return "✅ 완주" if d == n else ("🔶 진행 중" if d else "⬜ 진행 전")
 
 
+def haversine_km(lat1, lon1, lat2, lon2) -> float:
+    from math import asin, cos, radians, sin, sqrt
+
+    dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return 2 * 6371 * asin(sqrt(a))
+
+
+def segment_km(r: pd.DataFrame, route: str) -> list:
+    """이전 센터까지의 구간 길이(추정). 센터 간 직선거리 비율로 공식 총거리(km)를 나눈다."""
+    r = r.sort_values("seq")
+    pts = list(zip(r["lat"], r["lon"]))
+    gaps = [haversine_km(*a, *b) for a, b in zip(pts, pts[1:])]
+    total = sum(gaps) + (haversine_km(*pts[-1], *pts[0]) if route in LOOPS else 0)
+    km = r["km"].iloc[0]
+    if not total or pd.isna(km):
+        return [None] * len(r)
+    return [None] + [g * km / total for g in gaps]
+
+
+def toggle_detail(route: str):
+    st.session_state["detail"] = None if st.session_state.get("detail") == route else route
+
+
 def main():
     st.set_page_config(page_title="그랜드슬램 인증센터 지도", page_icon="🚲", layout="wide")
     st.title("🚲 그랜드슬램 인증센터 지도")
@@ -219,30 +243,54 @@ def main():
     c2.metric("완료", done)
     c3.metric("진행률", f"{done / total:.0%}")
 
-    # ---- 구간별 요약 (구간을 클릭하면 센터 이름이 펼쳐지고, 다시 클릭하면 접힘) ----
+    # ---- 구간별 현황 표 (상세루트 버튼을 누르면 해당 구간의 인증센터가 나옴) ----
     st.markdown("#### 그랜드슬램 구간별 현황")
-    st.caption("구간을 클릭하면 인증센터 이름이 나오고, 다시 클릭하면 요약으로 돌아갑니다.")
+    st.caption("'상세루트' 버튼을 누르면 해당 구간의 인증센터가 나오고, 다시 누르면 닫힙니다.")
+    widths = [2.6, 3.0, 0.9, 1.1, 1.2, 1.3]
+    for col, title in zip(st.columns(widths), ["그랜드슬램", "자전거길(구간)", "센터수", "길이", "상태", "상세"]):
+        col.markdown(f"**{title}**")
+    st.divider()
+
     for group in group_opts:
         g = df[df["group"] == group]
-        head = f"**{GROUP_LABEL.get(group, group)}**"
-        if group in GROUP_KM:
-            head += f" · {GROUP_KM[group]}km"
-        st.markdown(f"{head} · 센터 {len(g)}개 · 완료 {int(g['done'].sum())}개")
+        first = True
         for route, r in g.groupby("route", sort=False):
-            label = f"{route_status(r)}  {route} · 센터 {len(r)}개 · {km_text(r['km'].iloc[0])}"
-            with st.expander(label):
+            cols = st.columns(widths, vertical_alignment="center")
+            if first:
+                label = GROUP_LABEL.get(group, group)
+                if group in GROUP_KM:
+                    label += f" · 총 {GROUP_KM[group]}km"
+                cols[0].markdown(f"**{label}**")
+                first = False
+            cols[1].write(route)
+            cols[2].write(f"{len(r)}개")
+            cols[3].write(km_text(r["km"].iloc[0]))
+            cols[4].write(route_status(r))
+            is_open = st.session_state.get("detail") == route
+            cols[5].button(
+                "닫기" if is_open else "상세루트",
+                key=f"detail_{route}",
+                on_click=toggle_detail,
+                args=(route,),
+            )
+            if is_open:
+                r = r.sort_values("seq")
+                seg = segment_km(r, route)
                 st.dataframe(
                     pd.DataFrame(
                         {
                             "순서": r["seq"].values,
                             "인증센터": r["name"].values,
                             "유형": r["kind"].values,
+                            "이전 센터까지(약 km)": ["출발" if v is None else f"{v:.1f}" for v in seg],
                             "상태": ["✅ 완료" if d else "⬜ 미완료" for d in r["done"]],
                         }
                     ),
                     width="stretch",
                     hide_index=True,
                 )
+                st.caption(f"{route} · 센터 {len(r)}개 · 총 {km_text(r['km'].iloc[0])} (센터 간 거리는 직선거리 비율로 나눈 추정값)")
+        st.divider()
 
     st.markdown("#### 지도")
     if view.empty:
