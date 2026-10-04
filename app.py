@@ -152,18 +152,20 @@ RIDER_JS = """
     var style = document.createElement("style");
     style.textContent =
       ".dadson{background:none;border:none;}" +
-      ".dadson-inner{display:flex;align-items:flex-end;gap:6px;white-space:nowrap;line-height:1;" +
-      "filter:drop-shadow(0 3px 3px rgba(0,0,0,.35));cursor:pointer;}" +
-      ".dadson-rider{display:flex;flex-direction:column;align-items:center;" +
+      ".dadson-inner{display:flex;align-items:center;justify-content:center;gap:14px;width:100%;height:100%;" +
+      "white-space:nowrap;line-height:1;filter:drop-shadow(0 3px 3px rgba(0,0,0,.35));cursor:pointer;}" +
+      ".dadson-rider{position:relative;display:flex;align-items:center;" +
       "animation:dadson-bob .45s ease-in-out infinite alternate;}" +
       ".dadson-rider.son{animation-delay:.2s;}" +
-      ".dadson-bubble{position:relative;background:#fffbea;color:#111;border:2px solid #f59e0b;" +
-      "border-radius:14px;padding:2px 10px;font:800 14px/1.3 sans-serif;margin-bottom:8px;}" +
-      ".dadson-bubble:after{content:'';position:absolute;left:50%;bottom:-9px;margin-left:-6px;" +
-      "border:6px solid transparent;border-top-color:#f59e0b;border-bottom:0;}" +
-      ".dadson-emoji{font-size:60px;}" +
-      ".dadson-rider.son .dadson-emoji{font-size:44px;}" +
-      "@keyframes dadson-bob{from{transform:translateY(0);}to{transform:translateY(-6px);}}" +
+      ".dadson-bubble{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:9px;" +
+      "background:#fffbea;color:#111;border:2px solid #f59e0b;border-radius:12px;padding:1px 8px;" +
+      "font:800 12px/1.3 sans-serif;}" +
+      ".dadson-bubble:after{content:'';position:absolute;left:50%;bottom:-8px;margin-left:-5px;" +
+      "border:5px solid transparent;border-top-color:#f59e0b;border-bottom:0;}" +
+      ".dadson-emoji{display:inline-block;font-size:42px;transform:scaleX(-1);}" +   /* 오른쪽이 앞 */
+      ".dadson-rider.son .dadson-emoji{font-size:31px;}" +
+      ".dadson.faceleft .dadson-emoji{transform:none;}" +                            /* 서쪽으로 갈 때는 왼쪽이 앞 */
+      "@keyframes dadson-bob{from{transform:translateY(0);}to{transform:translateY(-4px);}}" +
       ".dadson-tip{font-weight:700;font-size:12px;border-radius:10px;}";
     document.head.appendChild(style);
 
@@ -173,22 +175,27 @@ RIDER_JS = """
     }
     var total = cum[cum.length - 1];
 
+    // 자전거의 한가운데가 국토종주 라인 위에 오도록 기준점을 아이콘 중앙에 둔다
     var icon = L.divIcon({
       className: "dadson",
       html: '<div class="dadson-inner">' +
             '<div class="dadson-rider dad"><div class="dadson-bubble">Han</div><span class="dadson-emoji">🚴‍♂️</span></div>' +
             '<div class="dadson-rider son"><div class="dadson-bubble">Cool Choi</div><span class="dadson-emoji">🚴</span></div>' +
             '</div>',
-      iconSize: [190, 130], iconAnchor: [95, 124]
+      iconSize: [87, 46], iconAnchor: [43, 23]
     });
     var marker = L.marker(pts[0], {icon: icon, zIndexOffset: 1000}).addTo(map);
     var READY = "인천 " + names[0] + " 출발 준비! ▶ Start를 눌러요";
-    marker.bindTooltip(READY, {permanent: true, direction: "bottom", offset: [0, 4], className: "dadson-tip"});
+    marker.bindTooltip(READY, {permanent: true, direction: "bottom", offset: [0, 26], className: "dadson-tip"});
 
-    var duration = 45000, startTs = null, req = null, lastText = "";
-    function position(d) {
+    var duration = 22500, startTs = null, req = null, lastText = "", faceLeft = false;
+    function segIndex(d) {
       var i = 1;
       while (i < cum.length - 1 && cum[i] < d) i++;
+      return i;
+    }
+    function position(d) {
+      var i = segIndex(d);
       var seg = cum[i] - cum[i - 1] || 1;
       var t = Math.min(Math.max((d - cum[i - 1]) / seg, 0), 1);
       return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t,
@@ -204,6 +211,12 @@ RIDER_JS = """
       var p = Math.min((ts - startTs) / duration, 1);
       var d = p * total;
       marker.setLatLng(position(d));
+      var i = segIndex(d), west = pts[i][1] < pts[i - 1][1];
+      if (west !== faceLeft) {
+        faceLeft = west;
+        var el = marker.getElement();
+        if (el) el.classList.toggle("faceleft", faceLeft);
+      }
       var k = passed(d), text;
       if (p >= 1) text = "🎉 " + names[names.length - 1] + " 도착!";
       else if (k === 0) text = "출발! " + names[0];
