@@ -39,12 +39,21 @@ GROUP_SHORT = {
 }
 COMPACT_CSS = """
 <style>
-.st-key-route_table [data-testid="stVerticalBlock"] { gap: 0.15rem; }
-.st-key-route_table [data-testid="stHorizontalBlock"] { gap: 0.4rem; }
+.st-key-route_table [data-testid="stVerticalBlock"] { gap: 0.1rem; }
+.st-key-route_table [data-testid="stHorizontalBlock"] {
+    gap: 0; align-items: stretch;
+    border-bottom: 1px solid rgba(128,128,128,.35);
+}
+.st-key-route_table [data-testid="stColumn"], .st-key-route_table [data-testid="column"] {
+    padding: 3px 8px; border-left: 1px solid rgba(128,128,128,.30);
+    display: flex; align-items: center;
+}
+.st-key-route_table [data-testid="stColumn"]:first-child, .st-key-route_table [data-testid="column"]:first-child { border-left: none; }
 .st-key-route_table p { margin: 0; font-size: 0.85rem; line-height: 1.25; }
 .st-key-route_table button { min-height: 1.6rem; padding: 0 0.5rem; }
 .st-key-route_table button p { font-size: 0.8rem; }
-.st-key-route_table .group-row { border-top: 1px solid rgba(128,128,128,.25); padding-top: 2px; }
+.route-hdr { font-weight: 800; color: #2563eb; }
+.group-sep { border-top: 3px solid rgba(37,99,235,.55); margin: 2px 0 0; }
 </style>
 """
 GROUP_KM = {"국토종주": 633}  # 국토종주 전체 거리(km)
@@ -110,11 +119,117 @@ def build_paths(df: pd.DataFrame):
     return paths
 
 
+RIDER_CSS = """
+<style>
+.dadson { background: none; border: none; }
+.dadson-inner { font-size: 28px; white-space: nowrap; line-height: 1;
+    animation: dadson-bob .45s ease-in-out infinite alternate;
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,.35)); }
+.dadson-inner .son { font-size: 20px; margin-left: -4px; }
+@keyframes dadson-bob { from { transform: translateY(0); } to { transform: translateY(-4px); } }
+.dadson-tip { font-weight: 700; font-size: 12px; border-radius: 10px; }
+.dadson-btn { background: #fff; color: #111; padding: 6px 10px; border-radius: 8px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.3); cursor: pointer; font-size: 13px; font-weight: 700; }
+</style>
+"""
+
+RIDER_JS = """
+(function () {
+  var map = __MAP__;
+  var pts = __PTS__;
+  var names = __NAMES__;
+  var cum = [0];
+  for (var i = 1; i < pts.length; i++) {
+    cum.push(cum[i - 1] + map.distance(pts[i - 1], pts[i]));
+  }
+  var total = cum[cum.length - 1];
+  var icon = L.divIcon({
+    className: "dadson",
+    html: '<div class="dadson-inner"><span class="dad">🚴‍♂️</span><span class="son">🚴</span></div>',
+    iconSize: [70, 40], iconAnchor: [35, 34]
+  });
+  var marker = L.marker(pts[0], {icon: icon, zIndexOffset: 1000, interactive: false}).addTo(map);
+  marker.bindTooltip("출발! " + names[0], {permanent: true, direction: "top", offset: [0, -30], className: "dadson-tip"});
+  var duration = 45000, startTs = null, req = null, lastText = "";
+  function position(d) {
+    var i = 1;
+    while (i < cum.length - 1 && cum[i] < d) i++;
+    var seg = cum[i] - cum[i - 1] || 1;
+    var t = Math.min(Math.max((d - cum[i - 1]) / seg, 0), 1);
+    return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t,
+            pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t];
+  }
+  function passed(d) {
+    var k = 0;
+    for (var i = 0; i < cum.length; i++) { if (cum[i] <= d + 1) k = i; }
+    return k;
+  }
+  function step(ts) {
+    if (startTs === null) startTs = ts;
+    var p = Math.min((ts - startTs) / duration, 1);
+    var d = p * total;
+    marker.setLatLng(position(d));
+    var k = passed(d), text;
+    if (p >= 1) text = "🎉 " + names[names.length - 1] + " 도착!";
+    else if (k === 0) text = "출발! " + names[0];
+    else text = "📍 " + names[k] + " 통과";
+    if (text !== lastText) { marker.setTooltipContent(text); lastText = text; }
+    if (p < 1) req = requestAnimationFrame(step);
+  }
+  function start() {
+    if (req) cancelAnimationFrame(req);
+    startTs = null;
+    req = requestAnimationFrame(step);
+  }
+  var ctl = L.control({position: "topright"});
+  ctl.onAdd = function () {
+    var div = L.DomUtil.create("div", "dadson-btn");
+    div.innerHTML = "🚴 다시 출발";
+    L.DomEvent.disableClickPropagation(div);
+    div.onclick = start;
+    return div;
+  };
+  ctl.addTo(map);
+  start();
+})();
+"""
+
+
+def add_rider(m: folium.Map, df: pd.DataFrame, shown: set):
+    """인천 아라서해갑문 → 부산 낙동강하굿둑까지 아빠와 아들이 자전거로 달리는 애니메이션."""
+    main = next((sub for label, sub in build_paths(df) if label == MAIN_LABEL), None)
+    if main is None or not set(main["name"]) <= shown:
+        return
+    js = (
+        RIDER_JS.replace("__MAP__", m.get_name())
+        .replace("__PTS__", json.dumps(main[["lat", "lon"]].values.tolist()))
+        .replace("__NAMES__", json.dumps(main["name"].tolist(), ensure_ascii=False))
+    )
+    m.get_root().header.add_child(folium.Element(RIDER_CSS))
+    m.get_root().script.add_child(folium.Element(js))
+
+
+def stat_cards(total: int, done: int) -> str:
+    items = [
+        ("전체 인증센터", f"{total}", "#2563eb", "37,99,235"),
+        ("완료", f"{done}", "#dc2626", "220,38,38"),
+        ("진행률", f"{done / total:.0%}", "#16a34a", "22,163,74"),
+    ]
+    cards = "".join(
+        f'<div style="flex:1; min-width:150px; border-left:6px solid {c}; background:rgba({rgb},.12);'
+        f' border-radius:10px; padding:10px 18px;">'
+        f'<div style="font-size:14px; opacity:.85;">{label}</div>'
+        f'<div style="font-size:34px; font-weight:800; color:{c}; line-height:1.2;">{value}</div></div>'
+        for label, value, c, rgb in items
+    )
+    return f'<div style="display:flex; gap:14px; flex-wrap:wrap; margin:6px 0 18px;">{cards}</div>'
+
+
 def km_text(km) -> str:
     return "" if pd.isna(km) else f"{km:g}km"
 
 
-def build_map(df: pd.DataFrame, view: pd.DataFrame, show_lines: bool = True) -> folium.Map:
+def build_map(df: pd.DataFrame, view: pd.DataFrame, show_lines: bool = True, animate: bool = True) -> folium.Map:
     """df: 전체 데이터(연결선 계산용), view: 화면에 표시할 센터."""
     m = folium.Map(location=[36.3, 127.8], zoom_start=7, tiles="OpenStreetMap")
     Fullscreen().add_to(m)
@@ -176,6 +291,8 @@ def build_map(df: pd.DataFrame, view: pd.DataFrame, show_lines: bool = True) -> 
       <span style="color:{TODO_COLOR}; font-weight:bold">· · ·</span> 전체 구간(점선) / 남은 인증센터
     </div>"""
     m.get_root().html.add_child(folium.Element(legend))
+    if animate:
+        add_rider(m, df, shown)
     return m
 
 
@@ -249,6 +366,7 @@ def main():
         picked_routes = st.multiselect("세부 자전거길(구간별)", route_opts, default=route_opts)
         status = st.radio("상태", ["전체", "완료", "미완료"], horizontal=True)
         show_lines = st.checkbox("자전거길 연결선 표시(센터 간 직선)", value=True)
+        animate = st.checkbox("🚴 아빠와 아들 자전거 애니메이션", value=True)
 
     view = df[df["route"].isin(picked_routes)]
     if status == "완료":
@@ -257,10 +375,14 @@ def main():
         view = view[~view["done"]]
 
     total, done = len(df), int(df["done"].sum())
-    c1, c2, c3 = st.columns(3)
-    c1.metric("전체 인증센터", total)
-    c2.metric("완료", done)
-    c3.metric("진행률", f"{done / total:.0%}")
+    st.markdown(stat_cards(total, done), unsafe_allow_html=True)
+
+    st.markdown("#### 🗺️ 국토종주 지도")
+    if view.empty:
+        st.info("조건에 맞는 인증센터가 없습니다.")
+    else:
+        st_folium(build_map(df, view, show_lines, animate), height=650, use_container_width=True, returned_objects=[])
+
 
     # ---- 구간별 현황 표 (왼쪽) + 상세루트 (오른쪽) : 한 화면에 보이도록 촘촘하게 ----
     st.markdown(COMPACT_CSS, unsafe_allow_html=True)
@@ -269,12 +391,13 @@ def main():
 
     with left:
         widths = [1.7, 3.0, 0.8, 0.9, 1.1, 1.0]
-        with st.container(key="route_table"):
+        with st.container(key="route_table", border=True):
             for col, title in zip(st.columns(widths), ["그랜드슬램", "자전거길(구간)", "센터", "길이", "상태", "상세"]):
-                col.markdown(f"**{title}**")
+                col.markdown(f'<div class="route-hdr">{title}</div>', unsafe_allow_html=True)
             for group in group_opts:
                 g = df[df["group"] == group]
                 first = True
+                st.markdown('<div class="group-sep"></div>', unsafe_allow_html=True)
                 for route, r in g.groupby("route", sort=False):
                     cols = st.columns(widths, vertical_alignment="center")
                     if first:
@@ -318,12 +441,6 @@ def main():
             st.caption("센터 간 거리는 직선거리 비율로 나눈 추정값입니다.")
         else:
             st.info("왼쪽 표의 '상세루트' 버튼을 누르면 해당 구간의 인증센터가 여기에 나옵니다.")
-
-    st.markdown("#### 지도")
-    if view.empty:
-        st.info("조건에 맞는 인증센터가 없습니다.")
-    else:
-        st_folium(build_map(df, view, show_lines), height=650, use_container_width=True, returned_objects=[])
 
     st.caption(
         "인증센터 이름·길이는 자전거 행복나눔(https://www.bike.go.kr) 안내를 따랐고, "
