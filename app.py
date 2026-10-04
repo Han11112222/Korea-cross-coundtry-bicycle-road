@@ -40,15 +40,10 @@ GROUP_SHORT = {
 COMPACT_CSS = """
 <style>
 .st-key-route_table [data-testid="stVerticalBlock"] { gap: 0.1rem; }
-.st-key-route_table [data-testid="stHorizontalBlock"] {
-    gap: 0; align-items: stretch;
-    border-bottom: 1px solid rgba(128,128,128,.35);
-}
+.st-key-route_table [data-testid="stHorizontalBlock"] { gap: 0; align-items: stretch; }
 .st-key-route_table [data-testid="stColumn"], .st-key-route_table [data-testid="column"] {
-    padding: 3px 8px; border-left: 1px solid rgba(128,128,128,.30);
-    display: flex; align-items: center;
+    padding: 3px 8px; display: flex; align-items: center;
 }
-.st-key-route_table [data-testid="stColumn"]:first-child, .st-key-route_table [data-testid="column"]:first-child { border-left: none; }
 .st-key-route_table p { margin: 0; font-size: 0.85rem; line-height: 1.25; }
 .st-key-route_table button { min-height: 1.6rem; padding: 0 0.5rem; }
 .st-key-route_table button p { font-size: 0.8rem; }
@@ -256,7 +251,6 @@ def build_map(df: pd.DataFrame, view: pd.DataFrame, show_lines: bool = True, ani
                 [[p["lat"], p["lon"]], [q["lat"], q["lon"]]],
                 color=TODO_COLOR, weight=3, opacity=0.8,
                 dash_array="2 8", line_cap="round",
-                tooltip=tip(p, q, done),
             ).add_to(m)
         # 2) 완료 구간: 붉은색 실선을 위에 덧그림
         for p, q, done in segments:
@@ -264,8 +258,14 @@ def build_map(df: pd.DataFrame, view: pd.DataFrame, show_lines: bool = True, ani
                 folium.PolyLine(
                     [[p["lat"], p["lon"]], [q["lat"], q["lon"]]],
                     color=DONE_COLOR, weight=5, opacity=0.9,
-                    tooltip=tip(p, q, done),
                 ).add_to(m)
+        # 3) 눈에 보이지 않는 넓은 반응 영역: 선 근처에 마우스를 가져가면 설명 박스 표시
+        for p, q, done in segments:
+            folium.PolyLine(
+                [[p["lat"], p["lon"]], [q["lat"], q["lon"]]],
+                color="#000000", weight=26, opacity=0.01,
+                tooltip=folium.Tooltip(tip(p, q, done), sticky=True),
+            ).add_to(m)
 
     cluster = MarkerCluster(disableClusteringAtZoom=10).add_to(m)
     for r in view.itertuples():
