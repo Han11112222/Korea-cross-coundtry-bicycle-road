@@ -1,0 +1,6 @@
+{
+  "_comment": "완료한 그랜드슬램 구간(group) 또는 개별 자전거길(route)을 적으세요. 인증센터 단위로 예외를 두려면 completed_centers에 이름을 추가하세요.",
+  "completed_groups": ["국토종주", "4대강", "북한강"],
+  "completed_routes": [],
+  "completed_centers": []
+}
